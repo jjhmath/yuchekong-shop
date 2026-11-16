@@ -1,0 +1,9 @@
+{
+  "name": "유체콩샵",
+  "short_name": "유체콩샵",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#F6F5F1",
+  "theme_color": "#1E7F6E",
+  "lang": "ko"
+}

@@ -1,0 +1,78 @@
+rules_version = '2';
+// 유체콩샵 앱 보안 규칙 (학원앱과 무관한 별도 프로젝트)
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function me() { return request.auth.uid; }
+    function isStaff() {
+      return signedIn() && exists(/databases/$(database)/documents/staff/$(me()));
+    }
+    function bookingOwner(id) {
+      return get(/databases/$(database)/documents/bookings/$(id)).data.ownerUid;
+    }
+
+    // 직원 명단: 파이어베이스 콘솔에서만 추가 (앱에서 스스로 직원이 될 수 없음)
+    match /staff/{id} {
+      allow read: if signedIn() && (id == me() || isStaff());
+      allow write: if false;
+    }
+
+    match /users/{id} {
+      allow read: if signedIn() && (id == me() || isStaff());
+      allow write: if signedIn() && id == me();
+    }
+
+    // 강아지 프로필(요청서 원본)
+    match /dogs/{id} {
+      allow read: if signedIn() && (resource.data.ownerUid == me() || isStaff());
+      allow create: if signedIn() && request.resource.data.ownerUid == me();
+      allow update: if signedIn() && resource.data.ownerUid == me()
+                    && request.resource.data.ownerUid == me();
+      allow delete: if signedIn() && resource.data.ownerUid == me();
+    }
+
+    // 예약: 접수 시점의 요청서 사본(request)이 함께 저장됨
+    match /bookings/{id} {
+      allow read: if signedIn() && (resource.data.ownerUid == me() || isStaff());
+      allow create: if signedIn()
+                    && request.resource.data.ownerUid == me()
+                    && request.resource.data.status == 'requested';
+      // 견주: 접수 대기 상태에서만 요청서·일정 수정 또는 취소
+      allow update: if signedIn() && resource.data.ownerUid == me()
+                    && resource.data.status == 'requested'
+                    && request.resource.data.status in ['requested', 'cancelled']
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                       .hasOnly(['request', 'date', 'time', 'service', 'move', 'address',
+                                 'memo', 'pickupLat', 'pickupLng', 'status', 'updatedAt', 'revisionCount']);
+      // 직원: 진행 상태·체크·리포트만 (견주 요청서는 바꿀 수 없음)
+      allow update: if isStaff()
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                       .hasOnly(['status', 'timeline', 'checks', 'groomerConfirmedAt',
+                                 'groomerConfirmedBy', 'report', 'updatedAt']);
+      allow delete: if false;
+
+      // 요청서 수정 기록: 추가만 가능, 수정·삭제 불가
+      match /revisions/{rid} {
+        allow read: if signedIn() && (bookingOwner(id) == me() || isStaff());
+        allow create: if signedIn() && bookingOwner(id) == me();
+        allow update, delete: if false;
+      }
+    }
+
+    // 실시간 위치: 매니저만 쓰고, 해당 예약 견주와 직원만 봄
+    match /live/{id} {
+      allow read: if signedIn() && (resource.data.ownerUid == me() || isStaff());
+      allow write: if isStaff();
+    }
+
+    // 사진(압축 이미지): 추가만 가능, 삭제·수정 불가 → 기록 보존
+    match /photos/{id} {
+      allow read: if signedIn() && (resource.data.ownerUid == me() || isStaff());
+      allow create: if signedIn()
+                    && (request.resource.data.ownerUid == me() || isStaff())
+                    && request.resource.data.data is string
+                    && request.resource.data.data.size() < 900000;
+      allow update, delete: if false;
+    }
+  }
+}
