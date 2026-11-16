@@ -98,6 +98,10 @@ function pickFile(capture) {
   });
 }
 
+// 오류가 나면 화면에 내용을 보여 줌 (원인 확인용)
+window.addEventListener('unhandledrejection', (ev) => { console.error(ev.reason); toast('오류: ' + (ev.reason?.code || ev.reason?.message || ev.reason)); });
+window.addEventListener('error', (ev) => { toast('오류: ' + ev.message); });
+
 // ---------- 로그인 · 데이터 구독 ----------
 onAuthStateChanged(auth, async (u) => {
   S.unsubs.forEach((f) => f()); S.unsubs = [];
@@ -151,14 +155,53 @@ function renderTabs(cur) {
   $tabs.innerHTML = items.map(([k, l]) => `<a href="#/${k}" class="${(cur === k || (k === 'shop' && cur === 'order')) ? 'on' : ''}">${l}</a>`).join('');
 }
 
+// 카카오톡·인스타 등 앱 안 브라우저에서는 구글 로그인이 막힘 → 일반 브라우저로 보내기
+const UA = navigator.userAgent || '';
+const IN_APP = /KAKAOTALK|Instagram|FBAN|FBAV|NAVER|Line\/|DaumApps|everytimeApp|; wv\)/i.test(UA);
+function openExternal() {
+  const url = location.href;
+  if (/KAKAOTALK/i.test(UA)) { location.href = 'kakaotalk://web/openExternal?url=' + encodeURIComponent(url); return; }
+  if (/Android/i.test(UA)) { location.href = 'intent://' + url.replace(/^https?:\/\//, '') + '#Intent;scheme=https;package=com.android.chrome;end'; return; }
+  navigator.clipboard?.writeText(url).then(() => toast('주소를 복사했어요. 사파리에 붙여 넣어 주세요.')).catch(() => {});
+}
+if (IN_APP && /KAKAOTALK/i.test(UA)) openExternal();
+
+async function googleLogin() {
+  const provider = new GoogleAuthProvider();
+  try { await signInWithPopup(auth, provider); }
+  catch (err) {
+    console.error(err);
+    const code = err?.code || '';
+    const msg = {
+      'auth/popup-blocked': '팝업이 막혔어요. 브라우저 설정에서 팝업을 허용하거나 다시 눌러 주세요.',
+      'auth/popup-closed-by-user': '로그인 창이 닫혔어요. 다시 눌러 주세요.',
+      'auth/cancelled-popup-request': '로그인 창이 닫혔어요. 다시 눌러 주세요.',
+      'auth/unauthorized-domain': '이 주소가 아직 로그인 허용 목록에 없어요. 샵에 알려 주세요.',
+      'auth/network-request-failed': '인터넷 연결을 확인해 주세요.',
+      'auth/web-storage-unsupported': '이 브라우저에서는 로그인할 수 없어요. 크롬이나 사파리로 열어 주세요.'
+    }[code] || `로그인에 실패했어요 (${code || '알 수 없는 오류'}). 크롬이나 사파리로 열어 다시 시도해 주세요.`;
+    const box = document.getElementById('loginErr');
+    if (box) box.textContent = msg; else toast(msg);
+  }
+}
+
 function renderLogin() {
   S.page = 'login';
+  if (IN_APP) {
+    $app.innerHTML = `
+      <h1 style="margin-top:80px">${e(SHOP.name)}</h1>
+      <div class="card"><p style="margin:0 0 8px"><b>지금 앱 안 브라우저로 열려 있어요.</b><br>카카오톡·인스타그램 안에서는 구글 로그인이 막혀 있어요. 크롬이나 사파리로 열어 주세요.</p>
+        <button class="btn" id="ext">크롬·사파리로 열기</button>
+        <p class="sub">안 열리면 오른쪽 위 ⋮ 또는 공유 버튼 → '다른 브라우저로 열기'를 눌러 주세요.</p></div>`;
+    document.getElementById('ext').onclick = openExternal;
+    return;
+  }
   $app.innerHTML = `
     <h1 style="margin-top:80px">${e(SHOP.name)}</h1>
     <p class="sub">픽업부터 귀가까지, 우리 아이 맞춤 미용</p>
     <div class="card"><p style="margin:0 0 8px">우리 아이 미용 요청서를 한 번 적어 두면 예약할 때마다 그대로 전달돼요.</p>
-      <button class="btn" id="login">구글 계정으로 시작하기</button></div>`;
-  document.getElementById('login').onclick = () => signInWithPopup(auth, new GoogleAuthProvider()).catch(() => toast('로그인에 실패했어요. 다시 시도해 주세요.'));
+      <button class="btn" id="login">구글 계정으로 시작하기</button><p class="sub" id="loginErr" style="color:var(--red)"></p></div>`;
+  document.getElementById('login').onclick = googleLogin;
 }
 
 // ---------- 견주: 홈 ----------
