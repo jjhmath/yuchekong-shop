@@ -48,3 +48,4 @@ label.f textarea{min-height:70px;resize:vertical}
 .live{display:inline-block;background:var(--red);color:#fff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:8px;margin-left:6px;vertical-align:middle}
 .hero{display:block;width:100%;max-height:420px;object-fit:cover;border-radius:22px;margin:20px 0 4px}
 .hero.small{max-height:180px;object-position:center 35%}
+.tabs[hidden]{display:none}
