@@ -5,7 +5,9 @@ service cloud.firestore {
     function signedIn() { return request.auth != null; }
     function me() { return request.auth.uid; }
     function isStaff() {
-      return signedIn() && exists(/databases/$(database)/documents/staff/$(me()));
+      // 테스트 모드(config/testMode 문서가 있을 때)는 누구나 샵·픽업 화면 사용 가능
+      return signedIn() && (exists(/databases/$(database)/documents/staff/$(me()))
+        || exists(/databases/$(database)/documents/config/testMode));
     }
     function bookingOwner(id) {
       return get(/databases/$(database)/documents/bookings/$(id)).data.ownerUid;
@@ -14,6 +16,12 @@ service cloud.firestore {
     // 직원 명단: 파이어베이스 콘솔에서만 추가 (앱에서 스스로 직원이 될 수 없음)
     match /staff/{id} {
       allow read: if signedIn() && (id == me() || isStaff());
+      allow write: if false;
+    }
+
+    // 설정 (테스트 모드 등): 콘솔에서만 변경
+    match /config/{id} {
+      allow read: if signedIn();
       allow write: if false;
     }
 

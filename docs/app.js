@@ -1,6 +1,6 @@
 // 유체콩샵 앱 — 견주 / 미용사 / 픽업 매니저
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getAuth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getAuth, onAuthStateChanged, signInAnonymously, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, collection, query, where,
   onSnapshot, getDocs, serverTimestamp, deleteField
@@ -108,6 +108,7 @@ onAuthStateChanged(auth, async (u) => {
   S.user = u; S.staff = null; S.dogs = []; S.bookings = []; S.all = [];
   if (!u) { $tabs.hidden = true; return renderLogin(); }
   try { const s = await getDoc(doc(db, 'staff', u.uid)); if (s.exists()) S.staff = s.data(); } catch { /* 직원 아님 */ }
+  try { const t = await getDoc(doc(db, 'config', 'testMode')); if (t.exists() && !S.staff) S.staff = { role: 'test' }; } catch { /* 테스트 모드 아님 */ }
   await setDoc(doc(db, 'users', u.uid), { name: u.displayName || '', email: u.email || '', lastSeen: serverTimestamp() }, { merge: true });
   S.unsubs.push(onSnapshot(query(collection(db, 'dogs'), where('ownerUid', '==', u.uid)), (q) => {
     S.dogs = q.docs.map((d) => ({ id: d.id, ...d.data() })); refresh();
@@ -155,53 +156,28 @@ function renderTabs(cur) {
   $tabs.innerHTML = items.map(([k, l]) => `<a href="#/${k}" class="${(cur === k || (k === 'shop' && cur === 'order')) ? 'on' : ''}">${l}</a>`).join('');
 }
 
-// 카카오톡·인스타 등 앱 안 브라우저에서는 구글 로그인이 막힘 → 일반 브라우저로 보내기
-const UA = navigator.userAgent || '';
-const IN_APP = /KAKAOTALK|Instagram|FBAN|FBAV|NAVER|Line\/|DaumApps|everytimeApp|; wv\)/i.test(UA);
-function openExternal() {
-  const url = location.href;
-  if (/KAKAOTALK/i.test(UA)) { location.href = 'kakaotalk://web/openExternal?url=' + encodeURIComponent(url); return; }
-  if (/Android/i.test(UA)) { location.href = 'intent://' + url.replace(/^https?:\/\//, '') + '#Intent;scheme=https;package=com.android.chrome;end'; return; }
-  navigator.clipboard?.writeText(url).then(() => toast('주소를 복사했어요. 사파리에 붙여 넣어 주세요.')).catch(() => {});
-}
-if (IN_APP && /KAKAOTALK/i.test(UA)) openExternal();
-
-async function googleLogin() {
-  const provider = new GoogleAuthProvider();
-  try { await signInWithPopup(auth, provider); }
+// 테스트 버전: 구글 없이 바로 시작 (익명 로그인 — 이 휴대폰·브라우저에만 기록이 남음)
+async function quickStart() {
+  const btn = document.getElementById('login'); if (btn) btn.disabled = true;
+  try { await signInAnonymously(auth); }
   catch (err) {
     console.error(err);
-    const code = err?.code || '';
-    const msg = {
-      'auth/popup-blocked': '팝업이 막혔어요. 브라우저 설정에서 팝업을 허용하거나 다시 눌러 주세요.',
-      'auth/popup-closed-by-user': '로그인 창이 닫혔어요. 다시 눌러 주세요.',
-      'auth/cancelled-popup-request': '로그인 창이 닫혔어요. 다시 눌러 주세요.',
-      'auth/unauthorized-domain': '이 주소가 아직 로그인 허용 목록에 없어요. 샵에 알려 주세요.',
-      'auth/network-request-failed': '인터넷 연결을 확인해 주세요.',
-      'auth/web-storage-unsupported': '이 브라우저에서는 로그인할 수 없어요. 크롬이나 사파리로 열어 주세요.'
-    }[code] || `로그인에 실패했어요 (${code || '알 수 없는 오류'}). 크롬이나 사파리로 열어 다시 시도해 주세요.`;
     const box = document.getElementById('loginErr');
-    if (box) box.textContent = msg; else toast(msg);
+    if (box) box.textContent = '들어가지 못했어요 (' + (err?.code || '알 수 없는 오류') + '). 잠시 후 다시 눌러 주세요.';
+    if (btn) btn.disabled = false;
   }
 }
 
 function renderLogin() {
   S.page = 'login';
-  if (IN_APP) {
-    $app.innerHTML = `
-      <h1 style="margin-top:80px">${e(SHOP.name)}</h1>
-      <div class="card"><p style="margin:0 0 8px"><b>지금 앱 안 브라우저로 열려 있어요.</b><br>카카오톡·인스타그램 안에서는 구글 로그인이 막혀 있어요. 크롬이나 사파리로 열어 주세요.</p>
-        <button class="btn" id="ext">크롬·사파리로 열기</button>
-        <p class="sub">안 열리면 오른쪽 위 ⋮ 또는 공유 버튼 → '다른 브라우저로 열기'를 눌러 주세요.</p></div>`;
-    document.getElementById('ext').onclick = openExternal;
-    return;
-  }
   $app.innerHTML = `
-    <h1 style="margin-top:80px">${e(SHOP.name)}</h1>
+    <img src="hero.jpg" alt="${e(SHOP.name)}에서 미용한 강아지들" class="hero">
+    <h1>${e(SHOP.name)}</h1>
     <p class="sub">픽업부터 귀가까지, 우리 아이 맞춤 미용</p>
     <div class="card"><p style="margin:0 0 8px">우리 아이 미용 요청서를 한 번 적어 두면 예약할 때마다 그대로 전달돼요.</p>
-      <button class="btn" id="login">구글 계정으로 시작하기</button><p class="sub" id="loginErr" style="color:var(--red)"></p></div>`;
-  document.getElementById('login').onclick = googleLogin;
+      <button class="btn" id="login">바로 시작하기</button><p class="sub" id="loginErr" style="color:var(--red)"></p>
+      <p class="sub" style="margin:4px 0 0">테스트 버전이에요. 견주·샵·픽업 화면을 모두 둘러볼 수 있어요.</p></div>`;
+  document.getElementById('login').onclick = quickStart;
 }
 
 // ---------- 견주: 홈 ----------
@@ -211,7 +187,7 @@ function renderHome() {
   const past = S.bookings.filter((b) => !active.includes(b));
   const bItem = (b) => `<a class="list-item" href="#/b/${b.id}"><span><b>${e(b.request?.name)}</b> · ${e(b.service)}<br><span class="sub">${e(b.date)} ${e(b.time)} · ${e(MOVES[b.move])}</span></span>${statusTag(b.status)}${MOVING.includes(b.status) ? '<span class="live">LIVE</span>' : ''}</a>`;
   $app.innerHTML = `
-    <h1>${e(SHOP.name)}</h1><p class="sub">${e(S.user.displayName || '')}님 반가워요</p>
+    <img src="hero.jpg" alt="" class="hero small"><h1>${e(SHOP.name)}</h1><p class="sub">${e(S.user.displayName || '보호자')}님 반가워요</p>
     <div class="card"><h2>우리 아이</h2>
       ${S.dogs.length ? S.dogs.map((d) => `<a class="list-item" href="#/dog/${d.id}"><span><b>${e(d.name)}</b> <span class="sub">${e(d.breed)} · ${e(d.age)} · ${e(d.weight)}</span><br>
         ${(d.allergies || []).map((a) => `<span class="tag red">${e(a)} 알러지</span>`).join('')}${(d.dislikes || []).slice(0, 2).map((a) => `<span class="tag red">${e(a)} 예민</span>`).join('')}</span><span class="sub">요청서 수정</span></a>`).join('') : '<p class="sub">아직 등록된 아이가 없어요.</p>'}
@@ -219,8 +195,8 @@ function renderHome() {
     <div class="card"><h2>진행 중인 예약</h2>${active.length ? active.map(bItem).join('') : '<p class="sub">진행 중인 예약이 없어요.</p>'}
       <a class="btn" href="#/book">미용 예약하기</a></div>
     ${past.length ? `<div class="card"><h2>지난 예약</h2>${past.slice(0, 10).map(bItem).join('')}</div>` : ''}
-    <button class="btn gray" id="logout">로그아웃</button>`;
-  document.getElementById('logout').onclick = () => signOut(auth);
+    ${S.user.isAnonymous ? '' : '<button class="btn gray" id="logout">로그아웃</button>'}`;
+  const lo = document.getElementById('logout'); if (lo) lo.onclick = () => signOut(auth);
 }
 
 // ---------- 견주: 강아지 요청서 ----------
@@ -320,8 +296,10 @@ function renderBook(dogId) {
     <div class="card" id="addrBox"><h2>픽업 장소</h2>
       <label class="f">주소<input name="address" placeholder="예: ○○아파트 101동 1203호"></label>
       <button type="button" class="btn line" id="here">지금 있는 곳을 픽업 위치로 저장</button><p class="sub" id="hereMsg"></p>
-      <label class="f">연락처<input name="phone" type="tel" required placeholder="010-0000-0000"></label>
       <label class="f">전달 메모 (공동현관 비밀번호 등)<textarea name="memo"></textarea></label></div>
+    <div class="card"><h2>보호자 정보</h2>
+      <label class="f">보호자 이름<input name="ownerName" required placeholder="예: 홍길동"></label>
+      <label class="f">연락처<input name="phone" type="tel" required placeholder="010-0000-0000"></label></div>
     <div class="card"><h2>확인 및 동의</h2>
       <ul class="sub" style="padding-left:18px;line-height:1.7;margin:0 0 8px">
         <li>선택한 아이의 미용 요청서가 이 예약에 그대로 첨부돼요.</li>
@@ -344,7 +322,7 @@ function renderBook(dogId) {
     const d = new Date();
     const code = `YC-${pad(d.getMonth() + 1)}${pad(d.getDate())}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
     const ref = await addDoc(collection(db, 'bookings'), {
-      ownerUid: S.user.uid, ownerName: S.user.displayName || '', ownerPhone: fd.phone || '',
+      ownerUid: S.user.uid, ownerName: fd.ownerName || S.user.displayName || '', ownerPhone: fd.phone || '',
       dogId: dog.id, service: fd.service, date: fd.date, time: fd.time, move: fd.move,
       address: fd.move === 'visit' ? '' : (fd.address || ''), memo: fd.memo || '', pickupLat: pick.lat, pickupLng: pick.lng,
       request: snapshotOf(dog), code, status: 'requested', revisionCount: 0, checks: {},
@@ -517,7 +495,7 @@ async function renderOrder(id) {
   const loadPh = () => photosOf(b.id).then((ps) => { const el = document.getElementById('ph'); if (!el) return; el.innerHTML = ps.length ? photoGrid(ps) : '아직 사진이 없어요'; fillPhotos(el); });
   loadPh();
   const ack = document.getElementById('ack');
-  if (ack) ack.onclick = () => updateDoc(doc(db, 'bookings', b.id), { groomerConfirmedAt: serverTimestamp(), groomerConfirmedBy: S.user.displayName || '', 'checks.0': serverTimestamp(), updatedAt: serverTimestamp() });
+  if (ack) ack.onclick = () => updateDoc(doc(db, 'bookings', b.id), { groomerConfirmedAt: serverTimestamp(), groomerConfirmedBy: S.user.displayName || '미용사', 'checks.0': serverTimestamp(), updatedAt: serverTimestamp() });
   const nx = document.getElementById('next');
   if (nx) nx.onclick = () => setStatus(b.id, next[0]);
   $app.querySelectorAll('[data-check]').forEach((btn) => btn.onclick = () => {
@@ -532,7 +510,7 @@ async function renderOrder(id) {
   });
   document.getElementById('rep').onsubmit = async (ev) => {
     ev.preventDefault();
-    const report = { ...Object.fromEntries(new FormData(ev.target)), by: S.user.displayName || '' };
+    const report = { ...Object.fromEntries(new FormData(ev.target)), by: S.user.displayName || '미용사' };
     if (b.report) await updateDoc(doc(db, 'bookings', b.id), { report, updatedAt: serverTimestamp() });
     else await setStatus(b.id, 'done', { report });
     toast('리포트를 보냈어요');
